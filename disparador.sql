@@ -1,0 +1,614 @@
+set serveroutput on
+--create or replace trigger empl_dis after delete or insert on empleado for each row
+--begin
+--	if deleting then
+--		insert into auditaremp values (sysdate,to_char(sysdate,'HH24:MI'),user,:OLD.num_emp,:OLD.nombre,'Borrado');
+--	end if;
+--	if inserting then
+--		insert into auditaremp values (sysdate,to_char(sysdate,'HH24:MI'),user,:NEW.num_emp,:NEW.nombre,'Insertado');
+--	end if;
+--end;
+--/
+--
+--
+--
+--create or replace trigger empl_dis2 after delete or insert on empleado for each row
+--declare
+--	modificado		varchar2(200):='';
+--begin
+--	if updating('nombre') then
+--		modificado:= modificado||' Nombre antiguo: '||:OLD.nombre||'   Nombre nuevo: '||:NEW.nombre;
+--	end if;
+--	if updating('puesto') then
+--		modificado:= modificado||' Puesto antiguo: '||:OLD.puesto||'   Puesto nuevo: '||:NEW.puesto;
+--	end if;
+--	if updating('num_sup') then
+--		modificado:= modificado||' Num_sup antiguo: '||:OLD.num_sup||'   Puesto nuevo: '||:NEW.num_sup;
+--	end if;
+--	if updating('salario') then
+--		modificado:= modificado||' Salario antiguo: '||:OLD.salario||'   Salario nuevo: '||:NEW.salario;
+--	end if;
+--	insert into auditaremp values (sysdate,to_char(sysdate,'HH24:MI'),user,num_emp,:NEW.nombre,'Modificado',modificado);
+--end;
+--/
+--
+-- Escribe un disparador que haga fallar cualquier operacion de modificacion del nombre o del numero de superior de un empleado, 
+-- o que suponga una subida de sueldo superior al 10%
+--create or replace trigger modif_emple before update of nombre, num_sup, salario on empleado for each row
+--begin
+--	if updating('salario') then
+--		if :new.salario > :old.salario * 1.1 then
+--			raise_application_error(-20335,'A '||:new.nombre||' no se puede subir el salario más de un 10%');
+--		end if;
+--	end if;
+--	if updating('num_sup') then
+--		raise_application_error(-20334,' No tiene permisos para modificar el num_sup de ningun empleado');
+--	end if;
+--end;
+--/
+--
+--1. Construir un disparador que, despues de snertar un cliente en la tabla tcliente, escriba mensajes de advertencia si el vendedor 
+--asignado no existe en la tabla tvendedor o si la provincia asignada no existe en la tabla tprovincia.
+--create or replace trigger insert_cli after insert on tcliente for each row
+--begin
+--	if :new.tvendedor is exists then
+--		if inserting then
+--			insert into tcliente values (dni,nombre,provincia,tipo,fecha_alta,vendedor,compras);
+--		else
+--			raise_application_error(-20200,' El vendedor introducida no existe');
+--		end if;
+--	end if;
+--	if :new.tprovincia is exists then
+--		if inserting then
+--			insert into tcliente values (dni,nombre,provincia,tipo,fecha_alta,vendedor,compras);
+--		else
+--			raise_application_error(-20201,' La provincia introducida no existe');
+--		end if;
+--	end if;
+--end;
+--/
+-- Juanan prefiere esta solucion. !!!!!OJO¡¡¡¡¡¡
+--create or replace trigger inser_cli after insert on tcliente for each row
+--declare
+--	filaven		tvendedor%rowtype;
+--	filapro		tprovincia%rowtype;
+--begin
+--	begin
+--		select * into filaven
+--		from	tvendedor
+--		where	cod_ven = :new.vendedor;
+--	exception
+--		when no_data_found then
+--			dbms_output.put_line('El vendedor no existe en la tabla tvendedor'); 
+--	end;
+--	begin
+--		select * into filapro
+--		from	tprovincia
+--		where	codigo = :new.provincia;
+--	exception
+--		when no_data_found then
+--			dbms_output.put_line('La provincia no existe en la tabla tprovincia');
+--	end;
+--end;
+--/
+--declare
+--	contven		number(1);
+--	contpro		number(1);
+--begin
+--	select count(*) into contven
+--	from tvendedor
+--	where	cod_ven = :new.vendedor;
+--	if cod_ven = 0 then
+--		dbms_output.put_line('El vendedor no existe en la tabla vendedores');
+--	end if;
+--	select count(*) into contpro
+--	from tprovincia
+--	where	codigo = :new.provincia;
+--	if codigo = 0 then
+--		dbms_output.put_line('La provincia no existe en la tabla provincias');
+--	end if;
+--end;
+--/
+--
+--2. Escribir un trigger que impida borrar una provincia de la tabla tprovincias si hay clientes en ella.
+--
+--create or replace impedir_borrar before delete on tprovincia for each row
+--declare
+--	filacli		tcliente%rowtype;
+--begin
+--	select * into filacli
+--	from tcliente
+--	where	provincia = :old.codigo;
+--	raise_application_error(-20013,'Solo hay un cliente en la tabla.');
+--	exception
+--		when no_data_found then
+--			null;
+--		when too_many_rows then
+--			raise_application_error(-20012,'Devulve demasiadas tablas');
+--end;
+--/
+--
+-- 3. Escribir un disparador que, despues de borrar un alumno de la tabla nuevos, compruebe si esta tambien en la tabla antiguos.
+-- De no ser asi, se procedera a borrarlo de la tabla alum y se escribira un mensaje indicandolo. Hcer lo mismo despues de borrar
+-- un alumno de antiguos si no esta en nuevos.
+--create or replace trigger borrar_alumno after delete on nuevos for each row
+--declare
+--    nom_ant    antiguos%rowtype;
+--    nom_alum    alum%rowtype;
+--begin
+--    select nombre into nom_ant
+--    from antiguos
+--    where nombre = :old.nombre;
+--    select nombre into nom_alum
+--    from alum
+--    where nombre = :old.nombre;
+--    exception
+--        when no_data_found then
+--            delete alum where nombre=:old.nombre;
+--            dbms_output.put_line('Se fue a hacer puñeta.');
+--end;
+--/
+--4. Disparador que impida borrar un alumno de la tabla ALUM si ese alumno esta en la tabla NUEVOS o esta en la tabla ANTIGUOS.
+--create or replace tigger imp_borrar before delete on alum for each row
+--declare
+--    nom_ant anitguos%rowtype;
+--    nom_nue nuevos%rowtype;
+--begin
+--    select count(nombre) into nom_ant
+--    from antiguos
+--    where nombre = :old.nombre;
+--    if nom_ant != 0 then
+--        raise_application_error(-20001,'El usuario existe en la tabla Antiguos.');
+--    end if;
+--    select count(nombre) into nom_nue
+--    from nuevos
+--   where nombre = :old.nombre;
+--    if nom_nue != 0 then
+--        raise_application_error(-20001,'El usuario existe en la tabla Nuevos.');
+--    end if;
+--end;
+--/
+--create or replace tigger imp_borrar before delete on alum for each row
+--declare
+--    nom_ant anitguos%rowtype;
+--    nom_nue nuevos%rowtype;
+--begin
+--    begin
+--        select nombre into nom_ant
+--        from antiguos
+--        where nombre = :old.nombre;
+--        raise_application_error(-20001,'El usuario existe en la tabla antiguos.');
+--    exception
+--        when no_data_found then
+--            null;
+--    end;
+--    begin
+--        select nombre into nom_nue
+--        from nuevos
+--        where nombre = :old.nombre;
+--        raise_application_error(-20002,'El usuario existe en la tabla nuevos.');
+--    exception  
+--        when no_data_found then
+--            null;
+--    end;
+--end;
+--/
+-- 5.Crear un disparador que, antes de borrar un alumno de la tabla Alum, lo borre de Nuevos y de Antiguos (si es que existe en ellas).
+--create or replace trigger borrar_alum before delete on alum for each row
+--declare
+--    nom_ant anitguos%rowtype;
+--    nom_nue nuevos%rowtype;
+--begin
+--    select count(0) into nom_ant
+--    from antiguos
+--    where nombre = :old.nombre;   
+--    select count(*) into nom_nue
+--    from nuevos
+--    where nombre = :old.nombre;
+--    if (nom_ant != 0) or (nom_nue != 0) then 
+--         delete antiguos where nombre=:old.nombre;
+--         delete nuevos where nombre=:old.nombre;
+--         dbms_output.put_line('El usuario: '||:old.nombre||' se ha borrado correctamente de la tabla Antiguos y Nuevos.');
+--    else if nom_ant != 0 then
+--            delete antiguos where nombre=:old.nombre;
+--            dbms_output.put_line('El usuario: '||:old.nombre||' se ha borrado correctamente de la tabla Antiguos.');
+--    else nom_nue != 0 then
+--            delete nuevos where nombre=:old.nombre;
+--            dbms_output.put_line('El usuario: '||:old.nombre||' se ha borrado correctamente de la tabla Nuevos.');
+--    end if;
+--    exception
+--        when no_data_found then
+--            null;
+--end;
+--/
+--
+-- Ejercicios Mariposas
+--1. Asociar a la tabla "ejemplar_coleccionado" un disparador que impida insertar una tupla cuando ya existe en la tabla "ejemplar_liberado".
+--create or replace trigger insertar_ejem after insert on ejemplarmariposa for each row
+--declare
+--    eje_new     ejemplarliberado%rowtype;
+--begin
+--    select * into eje_new
+--    from ejemplarliberado
+--    where nombre_especie = :new.nombre_especie
+--    and nombre_zona = :new.nombre_zona
+--    and fecha_captura = :new.fecha_captura
+--    and hora_captura = :new.hora_captura;
+--    raise_application_error(-20035,'La especie ya existe.');
+--exception
+--    when no_data_found when
+--        null;
+--end;
+--/
+--2. Similar al anterior. Asociar a la tabla "ejemplar_liberado" un disparador que impida insertar una tupla cuando ya existe en la tabla
+-- "ejemplar_coleccionado."
+--create or replace trigger insertar_ejem2 after insert on ejemplarmariposa for each row
+--declare
+--    eje_new     ejemplarcoleccionado%rowtype;
+--begin
+--    select * into eje_new
+--    from ejemplarcoleccionado
+--    where nombre_especie = :new.nombre_especie
+--    and nombre_zona = :new.nombre_zona
+--    and fecha_captura = :new.fecha_captura
+--    and hora_captura = :new.hora_captura;
+--    raise_application_error(-20035,'La especie ya existe.');
+--exception
+--    when no_data_found when
+--        null;
+--end;
+--/
+--3. Codificar un disparador asociado a la tabla "familia" que escriba en pantalla un mensaje adecuando cuando se inserte en ella una tupla de una familia
+-- de la que no se ha capturado ningún ejemplar.
+--set serveroutput on
+--create or replace trigger inser_fam_new after insert on familia for each row
+--declare
+--    eje_mar     number(1);
+--begin
+--    select count(*) into eje_mar
+--    from ejemplarmariposa a
+--    where exists (
+--        select *
+--        from espzoncom b
+--        where a.nombre_especie = b.nombre_especie
+--        and a.nombre_zona = b.nombre_zona
+--        and exists (
+--            select *
+--            from especie c
+--            where b.nombre_especie = c.nombre_especie
+--            and exists (
+--                select *
+--                from genero d
+--                where c.nombre_genero = d.nombre_genero
+--                and exists (
+--                    select *
+--                    from familia e
+--                    where d.nombre_familia = e.nombre_familia
+--                    and nombre_familia = :new.nombre_familia
+--                )
+--            )
+--        )
+--    );
+--    if eje_mar = 0 then
+--        dbms_output.put_line("Aun no hay ejemplares de esa familia");
+--    end if;
+--end;
+--/
+--
+-- PELICULAS
+--
+--1. Asociar a la tabla Director un disparador que advierta mediante un mensaje en pantall que el director que se esta insertando
+-- ya existe como actor o guionista o musico.
+--create or replace trigger inser_director before insert on director for each row
+--declare
+--    ac       number(1);
+--    gui   number(1);
+--    mus     number(1);
+--begin
+--    select count(*) into ac
+--    from actor
+--    where nombre_artistico = :new.nombre_artistico;
+--    select count(*) into gui
+--    from guionista
+--    where nombre_artistico = :new.nombre_artistico;
+--    select count(*) into mus
+--    from musico
+--    where nombre_artistico = :new.nombre_artistico;
+--    if actor = 0 then
+--        dbms_output.put_line('El Director ya existe en la tabla Actores');
+--    end if;
+--    if guionista = 0 then
+--        dbms_output.put_line('El Director ya existe en la tabla Guionista');
+--    end if;
+--    if musico = 0 then
+--        dbms_output.put_line('El Director ya existe en la tabla Musico');
+--    end if;
+--end;
+--/
+--
+--2. Codificar un disparador para la tabla Actor que, cuando se borre a un actor, borre a su vez la tupla correspondiente en Persona siempre y
+-- cuando no existe como guionista, musico o director.
+--
+--create or replace trigger borrar_actor after delete on actor for each row
+--declare
+--    dir     number(1);
+--    gui     number(1);
+--    mus     number(1);
+--begin
+--    select count(*) into dir
+--    from director
+--    where nombre_artistico = :old.nombre_artistico;
+--    select count(*) into gui
+--    from guionista
+--    where nombre_artistico = :old.nombre_artistico;
+--    select count(*) into mus
+--    from musico
+--    where nombre_artistico = :old.nombre_artistico;
+--    if (dir = 0) and (gui = 0) and (mus = 0) then
+--        delete per_pel where nombre_artistico = :old.nombre_artistico;
+--        delete per_pub where nombre_artistico = :old.nombre_artistico;
+--        delete persona where nombre_artistico = :old.nombre_artistico;
+--        dbms_output.put_line('Se ha borrado el actor de la tabla.');
+--    end if;
+--end;
+--/
+--
+--3. Establecer un disparador para la tabla Persona que impida la insercion de una tupla en la que el año de nacimiento sea mayor que el año de
+--defunción. Sí se permitiera que cualquiera de los dos campos o ambos tome valor NULL. El tigger tambien debera dispararse ante cualquier
+--modificación que afecte a alguno de esos campos.
+--create or replace trigger impedir_inser after insert or update of año_nacimiento, año_defuncion on persona for each row
+--begin
+--    if :new.año_nacimiento is not null and :new.año_defuncion is not null then
+--        if :new.año_nacimiento > :new.año_defuncion then
+--            raise_application_error(-20060,'El año de nacimiento es mayor que el año de defunción');
+--        end if;
+--    end if;       
+--end;
+--/
+--
+--4. Crear un disparador asociado a la tabla PRE_ACT que escriba en pantall un mensaje de advertencia si la tupla insertada no incluye en el campo Nombre_Premio
+--la actriz o la palabra Actor. Por ejemplo, insert into pre_act values(2000,'JULIA ROBERTS','MEJOR ACTRIZ','OSCARS'); no daría lugar a ningun mensjae, en tanto 
+--que insert into pre_act values(2010,'JULIA ROBERTS','PREMIO DONOSTIA','FESTIVAL DE SAN SEBASTIAN'); provocaría la aparicion 
+--en pantalla de un mensaje de advertencia.
+--create or replace trigger adver_premio before insert on pre_act for each row
+--begin
+--	if nombre_premio is not null then
+--		if :new.nombre_premio not like 'ACTOR' or :new.nombre_premio not like 'ACTRIZ' then
+--			dbms_output.put_line('No incluye actor o actriz');
+--		end if;
+--	end if;
+--end;
+--/
+--
+--5. Asociar a la tabla Certamen un disparador que impida insertar una tupla en la que el año del certamen sea inferior al año de creacion del festival.
+--En el caso de que este campo(año_creacion) sea NULL, no se impedira la inserción de la tupla pero se mostrara en pantalla un mensaje indicando la 
+--conveniencia de poner el año de creacion en la tupla de Festival.
+--create or replace trigger imp_certamen before insert on certamen for each row
+--declare
+--	ano		festival%rowtype;
+--begin
+--	select * into ano
+--	from festival;
+--	if año_creacion is not null then
+--		if ano > :new.año_certamen then
+--			raise_application_error(-20059,'Error.');
+--		end if;
+--	else
+--		dbms_output.put_line('Tienes que poner el año de creacion en la tupla.')
+--	end if;
+--end;
+--/
+--1. Construir un disparador que permita almacenar en una tabla el codigo y el titulo de las peliculas insertadas, el nombre del usuario que realizo
+-- la insercion y la fecha en la que se produjo. Para ello, sera necesario, crear, previamente, una tabla PELISINSERTADAS con los campos adecuados. 
+-- Se pide tambien la realizacion de un procediminento almacenado que, utilizando esta tabla, ademas de PEL_PER, se encargue de sacar por pantalla
+-- el nombre de usuario, el codigo y el titulo de las peliculas de las que no existen actores ni directores ni guionistas ni musicos, de cara a que 
+-- se pueda pedir a esos usuarios que faciliten mas información sobre las personas que han intervenido en las peliculas insertadas por ellos.
+-- ¡OJO! No hay que usar la tabla peliculas sino pelisinsertadas.
+
+--
+--
+--
+--create or replace trigger trg_logon_db after logon on database
+--begin
+--	insert into tabla_auditoria_conexiones values (user, sysdate, 'logon');
+--end;
+--/
+--create or replace trigger trg_logonoff_db before logoff on database
+--begin
+--	insert into tabla_auditoria_conexiones values (user, sysdate, 'logoff');
+--end;
+--/
+--
+--
+--
+--1. Realizar un disparador de base de datos que borre todas las tuplas de la tabla GRADO cuando se inicia la instancia. Antes de probarlo hay que comprobar
+-- que el trigger no se dispara cuando se inicia una sesion. (Antes de hacer el disparador, ejecutese el script CREARSISG2015 estando como sys).
+--create or replace trigger borrar_grado after startup on database
+--begin
+--	delete system.grado;
+--end;
+--/
+--
+--
+--2. Hacer un trigger de base de datos que modifique el campo comisión de todos los empleados antes de la parada de la instancia. El nuevo valor del campo
+-- comisión será 10. Haganse las mismas comprobaciones que en el ejercicio anterior.
+--create or replace trigger mod_comision before shutdown on database
+--begin
+--	update system.empleado set comision = 10;
+--end;
+--/
+--
+--
+--drop table tabla_errores_capturados;
+--create table tabla_errores_capturados(
+--	fecha	date,
+--	nombre_usuario		varchar2(30),
+--	terminal			varchar2(50),
+--	num_error			varchar2(10),
+--	mensaje				varchar2(4000)
+--)
+--/
+--
+-- Ejemplo apuntes
+--create or replace trigger mostrar_error after servererror on database
+--begin
+--	for n in 1..ora_server_error_depth loop
+--		insert into tabla_errores_capturados values(sysdate, ora_login_user, ora_client_ip_address, ora_server_error(n), ora_server_error_msg(n));
+--	end loop;
+--end;
+--/
+--
+--3. Construir un disparador de base de datos que escriba en pantalla la frase "Se ha producido el error: ............" en el momento en el que se produzca.
+--create or replace trigger mostrar_errores after servererror on database
+--begin
+--	dbms_output.put_line('Se ha producido el error: '||ora_server_error_msg(1));
+--end;
+--/
+--
+--
+--drop table erroresdistintos;
+--create table erroresdistintos(
+--	codigo		number(5),
+--	mensaje		varchar2(4000),
+--	fecha1		date,
+--	fecha2		date
+--)
+--/
+--
+--
+--4. Crear una nueva versión del trigger anterior que guarde en una tabla todos los tipos de errores distintos que se van produciendo en la base de datos.
+-- Por cada error solo habra una tupla en la tabla, no debe repetirse ninguno. La tabla tendra cuatro campos: uno para el codigo, otro para el mensaje,
+-- otro para el mensaje, otro para la fecha de la primera vez que se produjo y otro para la fecha de la última vez.
+--create or replace trigger mostrar_error_2 after servererror on database
+--declare
+--	existe		erroresdistintos.codigo%type;
+--begin
+--	select count(codigo) into existe
+--	from erroresdistintos
+--	where codigo = ora_server_error(1);
+--	if existe = 0 then
+--		insert into erroresdistintos values (ora_server_error(1), ora_server_error_msg(1), sysdate, sysdate);
+--	else
+--		update erroresdistintos set fecha2 = sysdate where codigo = ora_server_error(1);
+--	end if;
+--end;
+--/
+--
+--
+--2. Crear un trigger que impida el borrado de un empleado en fin de semana (sabado y domingo) y que lo haga explicito al usuario que lo intenta con un
+-- mensaje adecuado. NO TIENE FOR EACH ROW
+--create or replace trigger imp_borrar2 after delete on empleado
+--begin
+--	if to_number(to_char(sysdate, 'd')) in (6,7) then
+--		raise_application_error(-20000,'No se puede eliminar un usuario en fin de semana.');
+--end;
+--/
+--
+--1. Realizar un trigger que verifique que el valor del campo total_compra de todas las tuplas de la tabla TPROVINCIA sea igual a la suma de los
+-- valores de los campos compas de todos los clientes de cada provincia.
+--
+--create or replace trigger act_compras before shutdown on database
+--begin
+--	update system.tprovincia set total_compra = 0;
+--	update system.tprovincia set total_compra = 
+--				(select sum(compras) from system.tcliente where provincia = codigo)
+--	where exists 
+--				(select * from system.tcliente where provincia = codigo );
+--end;
+--/
+--
+--
+--1. Realizar un disparador que incremente el valor del campo total_compra de la tabla TPROVINCIA con el valor del campo compras cada vez que se
+-- inserta un cliente.
+--create or replace trigger inc_total_compra after insert on tprovincia for each row
+--begin
+--	update tprovincia set total_compra = total_compra + :new.compras where codigo = :new.provincia;
+--end;
+--/
+--
+--
+-- Escribir un disparador para que cualquier modificacion en los campos edad o localidad de una tupla de la tabla ALUM implique la misma 
+-- modificacion en ANTIGUOS o NUEVOS si la tupla se encuentra tambien en ellas.
+-- create or replace trigger mod_alumn after update of edad, localidad on alum for each row
+-- declare
+	-- contantiguos	number(1);
+	-- contnuevos	number(1);
+-- begin
+	-- select count(*) into contantiguos
+	-- from antiguos
+	-- where nombre = :new.nombre;
+	-- if contantiguos = 1 then
+		-- update antiguos set edad = :new.edad, localidad = :new.localidad where nombre = :new.nombre;
+	-- end if;
+	-- select count(*) into contnuevos
+	-- from nuevos
+	-- where nombre = :new.nombre;
+	-- if contnuevos = 1 then
+		-- update nuevos set edad = :new.edad, localidad = :new.localidad where nombre = :new.nombre;
+	-- end if;
+-- end;
+-- /
+--
+--
+-- Hacer un disparador que guarde en la tabla AUDITARGRADO las referencias de todas las inserciones y borrados, y de todas las modificaciones de los campos
+-- salario_min y salario_max.
+-- drop table auditargrado;
+-- create table auditargrado(
+	-- usuario		varchar2(25),
+	-- fecha		date,
+	-- operacion	varchar2(15)
+-- );
+-- create or replace trigger auditargradov2 after insert, update, delete of salario_min, salario_max on grado for each row
+-- begin
+	-- if inserting then
+		-- insert into auditargradov2 values(user,sysdate,'Insercion');
+	-- end if;
+	-- if deleting then
+		-- insert into auditargradov2 values(user,sysdate,'Eliminacion');
+	-- end if;
+	-- if updating then
+		-- insert into auditargradov2 values(user,sysdate,'Modificacion');
+	-- end if;
+-- end;
+-- /
+--
+--
+-- Modificar el siguiente programa de forma que la expecion no_data_found que se produce en el procedimiento se acabe tratando en el programa principal
+-- sin quitar la parte exception del procedimiento, es decir, escribiendo algo en ligar de .......
+-- Ademas en el bloque principal deberan controlarse de manera generica todos los posibles errores/excepciones que puedan producise.
+-- DECLARE
+	-- procedure altaventa(fec date, cli char, art char, can number) is
+     	  -- mi_error exception;
+    	  -- pragma exception_init(mi_error,-20000);
+     	  -- err_num number;
+      	  -- err_msg varchar2(80);
+-- begin
+  	-- insert into tventa values(cli, art, fec, can);
+    -- update tarticulo set stock=stock - can where cod_art=art;
+-- exception
+   	 -- when no_data_found then
+		-- raise;
+-- end altaventa;
+-- BEGIN
+	-- altaventa(‘23/02/2012’, ‘20202020’, ‘ART1’, 8);
+-- exception
+	-- when no_data_found then
+		-- dbms_output.put_line('No se ha encontrado.')
+-- END;
+-- /
+--
+--
+-- Realizar un disparador de base de datos que, antes de cerrar la instancia, se encargue de poner a cero el campo comisión de todos los empleados en el caso de
+-- de que sea domingo. Si el cierre se produce en cualquier otro dia de la semana, deberan borrarse todas las tuplas de la tabla grado.
+create or replace trigger comision0 before shutdown on database
+begin
+	if to_number(to_char(sysdate, 'd')) in (7) then
+		update system.empleado set comision = 0;
+	else
+		delete from system.grado;
+	end if;
+end;
+/
+
+
+
